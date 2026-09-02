@@ -29,6 +29,8 @@ placeholders and must be replaced before use.
   fingerprint or session tags.
 - Transparent deterministic shadow scoring with fixed weights, cohort-level
   evaluation and an explicit no-enforcement guarantee.
+- Zero-weight client-hint platform/mobile coherence measurements that retain
+  booleans only and cannot change a score or enforcement decision.
 - A pinned open-source BotD baseline evaluated separately from the custom score.
 - Optional short-lived, nonce-bound HMAC proof for known-good first-party
   automation without bypassing detection or enabling enforcement.

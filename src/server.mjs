@@ -36,6 +36,8 @@ const SHADOW_RULES = {
   'cross-site-observation': 20,
   'implausibly-fast-action': 10,
   'no-interaction-before-run': 10,
+  'client-hint-platform-mismatch': 0,
+  'client-hint-mobile-mismatch': 0,
 };
 
 const MIME = new Map([
@@ -252,15 +254,38 @@ export function createBotLab(options = {}) {
     }
   };
 
-  const requestEvidence = (request) => ({
-    userAgentPresent: typeof request.headers['user-agent'] === 'string'
-      && request.headers['user-agent'].trim().length > 0,
-    acceptLanguagePresent: typeof request.headers['accept-language'] === 'string'
-      && request.headers['accept-language'].trim().length > 0,
-    fetchSite: typeof request.headers['sec-fetch-site'] === 'string'
-      ? request.headers['sec-fetch-site']
-      : 'missing',
-  });
+  const requestEvidence = (request) => {
+    const userAgent = typeof request.headers['user-agent'] === 'string'
+      && request.headers['user-agent'].length <= 512
+      ? request.headers['user-agent']
+      : '';
+    const platformHint = typeof request.headers['sec-ch-ua-platform'] === 'string'
+      && request.headers['sec-ch-ua-platform'].length <= 32
+      ? request.headers['sec-ch-ua-platform'].replaceAll('"', '').trim()
+      : '';
+    const mobileHint = request.headers['sec-ch-ua-mobile'];
+    const platformPatterns = [
+      ['Android', /Android/i],
+      ['Windows', /Windows/i],
+      ['macOS', /Macintosh|Mac OS X/i],
+      ['iOS', /iPhone|iPad/i],
+      ['Chrome OS', /CrOS/i],
+      ['Linux', /Linux/i],
+    ];
+    const userAgentPlatform = platformPatterns.find(([, pattern]) => pattern.test(userAgent))?.[0];
+    const userAgentMobile = /Mobile|Android|iPhone|iPad/i.test(userAgent);
+    return {
+      userAgentPresent: userAgent.trim().length > 0,
+      acceptLanguagePresent: typeof request.headers['accept-language'] === 'string'
+        && request.headers['accept-language'].trim().length > 0,
+      fetchSite: typeof request.headers['sec-fetch-site'] === 'string'
+        ? request.headers['sec-fetch-site']
+        : 'missing',
+      platformHintMismatch: Boolean(userAgentPlatform && platformHint && userAgentPlatform !== platformHint),
+      mobileHintMismatch: ['?0', '?1'].includes(mobileHint)
+        && (mobileHint === '?1') !== userAgentMobile,
+    };
+  };
 
   const verifyAgentProof = (request, pathname, requestNow) => {
     if (!verifiedAgentSecret) return false;
@@ -370,6 +395,8 @@ export function createBotLab(options = {}) {
     if (!['missing', 'same-origin', 'same-site', 'none'].includes(observation.requestEvidence.fetchSite)) {
       rules.push('cross-site-observation');
     }
+    if (observation.requestEvidence.platformHintMismatch) rules.push('client-hint-platform-mismatch');
+    if (observation.requestEvidence.mobileHintMismatch) rules.push('client-hint-mobile-mismatch');
     if (observation.interaction.pageAgeMs < 100) rules.push('implausibly-fast-action');
     if (observation.interaction.pointerEvents === 0 && observation.interaction.keyEvents === 0) {
       rules.push('no-interaction-before-run');

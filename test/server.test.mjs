@@ -240,6 +240,55 @@ test('shadow scoring is transparent, context-independent and never enforced', as
   assert.match(report.interpretation, /never as a score input/);
 });
 
+test('client-hint coherence retains mismatch booleans only and has zero shadow weight', async (t) => {
+  const base = await fixture(t);
+  const cookie = await sessionCookie(base);
+  const response = await fetch(`${base}/api/observe`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'accept-language': 'en-GB',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0) Chrome/152.0',
+      'sec-ch-ua-platform': '"macOS"',
+      'sec-ch-ua-mobile': '?1',
+      cookie,
+    },
+    body: JSON.stringify({
+      visitorId: 'dddddddddddddddddddddddddddddddd',
+      componentCount: 42,
+      collectionMs: 100,
+      webdriver: false,
+      touchPoints: 0,
+      viewport: '1280x720',
+      context: 'authorised-automation',
+      botd: { available: true, bot: true, kind: 'headless_chrome' },
+      interaction: { pageAgeMs: 500, pointerEvents: 1, keyEvents: 0 },
+    }),
+  });
+  assert.equal(response.status, 201);
+  const text = await response.text();
+  const observation = JSON.parse(text).observation;
+  assert.equal(observation.shadowScore, 0);
+  assert.deepEqual(observation.shadowRules, [
+    'client-hint-platform-mismatch',
+    'client-hint-mobile-mismatch',
+  ]);
+  assert.deepEqual(observation.requestEvidence, {
+    userAgentPresent: true,
+    acceptLanguagePresent: true,
+    fetchSite: 'same-origin',
+    platformHintMismatch: true,
+    mobileHintMismatch: true,
+  });
+  assert.doesNotMatch(text, /Windows NT|macOS/);
+
+  const report = await fetch(`${base}/api/shadow-report`).then((result) => result.json());
+  assert.equal(report.weights['client-hint-platform-mismatch'], 0);
+  assert.equal(report.weights['client-hint-mobile-mismatch'], 0);
+  assert.equal(report.enforcement, false);
+});
+
 test('open-source BotD is bounded, aggregate and evaluated separately from the custom score', async (t) => {
   const base = await fixture(t);
   const ordinaryCookie = await sessionCookie(base);
