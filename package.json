@@ -1,6 +1,6 @@
 {
   "name": "bot-lab",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "private": true,
   "type": "module",
   "description": "A privacy-bounded browser fingerprint and proof-of-work experiment lab.",

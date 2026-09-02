@@ -52,6 +52,8 @@ placeholders and must be replaced before use.
 - An explicitly loaded Cloudflare Turnstile comparison with mandatory server-
   side Siteverify plus expected hostname and action checks.
 - Restrictive browser security headers and no third-party runtime requests.
+- Crawl-friendly `robots.txt` paired with response-level `noindex`, so polite
+  red-team clients can participate without making the lab search-indexable.
 
 The open-source FingerprintJS identifier is client-generated and spoofable. It
 is evidence for an experiment, not an authentication or authorization claim.

@@ -59,6 +59,11 @@ test('health and static responses carry defensive headers', async (t) => {
   assert.equal(protectedDemo.status, 200);
   assert.match(await protectedDemo.text(), /Anubis challenge passed/);
 
+  const robots = await fetch(`${base}/robots.txt`);
+  assert.equal(robots.status, 200);
+  assert.equal(robots.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive');
+  assert.match(await robots.text(), /User-agent: \*\s+Allow: \//);
+
   const client = await fetch(`${base}/assets/app-v6-2.js`);
   assert.equal(client.status, 200);
   const clientBody = await client.text();
