@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b1020">
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <meta name="description" content="A privacy-bounded browser fingerprint and proof-of-work experiment lab.">
+    <title>Bot Lab · Browser signals and proof of work</title>
+    <link rel="stylesheet" href="/app.css">
+    <script type="module" src="/assets/app-v6-2.js"></script>
+  </head>
+  <body class="entry-gated">
+    <div id="entry-gate" class="entry-gate" role="dialog" aria-modal="true" aria-labelledby="entry-gate-title" aria-describedby="entry-gate-summary">
+      <div class="entry-gate-card">
+        <div class="entry-gate-sides" aria-hidden="true"><span>Red team</span><span>Blue team</span></div>
+        <p class="eyebrow">Authorised testing boundary</p>
+        <h1 id="entry-gate-title">Enter the Bot Lab.</h1>
+        <p id="entry-gate-summary" class="entry-gate-summary">This is a controlled red/blue-team test bed. It is built for authorised offensive simulation and defensive measurement—not activity against systems you do not own or have permission to assess.</p>
+        <ul class="entry-gate-points">
+          <li><strong>Stay in scope.</strong> Test only this lab or another target you are explicitly authorised to assess.</li>
+          <li><strong>Expect active defences.</strong> Requests may be inspected, challenged, rate-limited or blocked.</li>
+          <li><strong>Keep test data synthetic.</strong> Do not submit real credentials, personal information or third-party secrets.</li>
+          <li><strong>Know the privacy boundary.</strong> Local security records may include an IP address for up to 24 hours; CrowdSec community sharing is disabled.</li>
+        </ul>
+        <p class="entry-gate-detail">Fingerprint collection starts only when you press <strong>Run fingerprint</strong>. Cloudflare Turnstile loads only when you request it. This notice is not access control.</p>
+        <button id="enter-lab" class="primary-action entry-gate-action" type="button">I understand — enter the lab</button>
+        <p class="entry-gate-memory">Your acknowledgement lasts only for this browser tab.</p>
+      </div>
+    </div>
+    <header class="site-header" inert>
+      <div class="topbar">
+        <div class="brand"><span class="brand-mark">BL</span><span>Bot Lab</span></div>
+        <span class="status-chip"><span aria-hidden="true"></span>Report-only experiment</span>
+      </div>
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">Authorised browser-signal studio</p>
+          <h1>See what your browser reveals.</h1>
+          <p class="lede">Explore browser fingerprints, compare challenge systems, and see why individual signals are evidence—not identity.</p>
+          <div class="trust-list" aria-label="Privacy boundaries">
+            <span>Raw browser values stay on your device</span>
+            <span>Observations expire after 15 minutes</span>
+            <span>Security addresses expire within 24 hours</span>
+          </div>
+        </div>
+        <aside class="journey-card" aria-labelledby="journey-heading">
+          <p class="mini-label">A simple path</p>
+          <h2 id="journey-heading">Run → inspect → compare</h2>
+          <ol>
+            <li><span>1</span><div><strong>Run a fingerprint</strong><small>Collection starts only when you choose.</small></div></li>
+            <li><span>2</span><div><strong>Explore every signal</strong><small>Open full values and plain-language explanations.</small></div></li>
+            <li><span>3</span><div><strong>Compare weak evidence</strong><small>See stability and shadow scores without enforcement.</small></div></li>
+          </ol>
+        </aside>
+      </div>
+      <nav class="quick-nav" aria-label="Bot Lab sections">
+        <a href="#fingerprint">Fingerprint</a>
+        <a href="#challenges">Challenges</a>
+        <a href="#comparison">Comparison</a>
+        <a href="#shadow">Shadow score</a>
+        <a href="#defences">Defences</a>
+      </nav>
+    </header>
+
+    <main inert>
+      <section id="fingerprint" class="lab-card card-wide" aria-labelledby="fingerprint-heading">
+        <div class="section-head">
+          <div><span class="step-number">01</span><div><p class="mini-label">Start here</p><h2 id="fingerprint-heading">Explore your browser fingerprint</h2></div></div>
+          <button id="run-fingerprint" class="primary-action" type="button">Run fingerprint</button>
+        </div>
+        <p class="section-copy">FingerprintJS combines many small browser characteristics into a repeatable identifier. Run it once, then inspect exactly which signals contributed.</p>
+        <div class="privacy-note"><span aria-hidden="true">◎</span><p><strong>Your detailed values remain local.</strong> Bot Lab receives only the completed identifier and bounded summaries, converts it to a temporary keyed tag, and forgets the observation after 15 minutes.</p></div>
+        <div class="experiment-control">
+          <label for="experiment-context">How are you running this test?</label>
+          <select id="experiment-context">
+            <option value="ordinary">Ordinary browser</option>
+            <option value="private">Private window</option>
+            <option value="authorised-automation">Authorised automation</option>
+          </select>
+          <small>This honest label helps evaluate the experiment later. It never changes the score.</small>
+        </div>
+        <div id="fingerprint-output" class="output status-panel" aria-live="polite">Ready when you are. One run is enough to explore your browser signals.</div>
+        <div id="component-explorer" class="component-explorer" hidden></div>
+        <div class="subsection-head"><div><p class="mini-label">This tab only</p><h3>Recent runs</h3></div><p>Repeat a run to see whether the identifier stays stable.</p></div>
+        <div class="table-wrap history-table">
+          <table>
+            <thead><tr><th>Run</th><th>Visitor ID</th><th>Context</th><th>Signals</th><th>Duration</th><th>Stability</th></tr></thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+        <button id="clear-local" class="quiet" type="button">Clear local run history</button>
+      </section>
+
+      <section id="challenges" class="lab-card half-card" aria-labelledby="challenge-heading">
+        <div class="section-head"><div><span class="step-number">02</span><div><p class="mini-label">Self-hosted</p><h2 id="challenge-heading">ALTCHA proof of work</h2></div></div></div>
+        <p class="section-copy">Your browser performs a small piece of computational work. Bot Lab verifies it once, then rejects replays.</p>
+        <p class="control-boundary"><strong>What it demonstrates:</strong> signed challenges, two-minute expiry and one-use verification.</p>
+        <form id="challenge-form">
+          <altcha-widget challenge="/api/challenge" name="altcha" type="checkbox" workers="2"></altcha-widget>
+          <button type="submit">Verify proof</button>
+        </form>
+        <p id="challenge-output" class="output" aria-live="polite">No proof submitted.</p>
+      </section>
+
+      <section class="lab-card half-card" aria-labelledby="turnstile-heading">
+        <div class="section-head">
+          <div><span class="step-number">03</span><div><p class="mini-label">Managed service</p><h2 id="turnstile-heading">Cloudflare Turnstile</h2></div></div>
+          <button id="load-turnstile" type="button" disabled>Load Turnstile</button>
+        </div>
+        <p class="section-copy">Compare a provider-managed challenge with ALTCHA. Cloudflare is contacted only after you choose to load it.</p>
+        <p class="control-boundary"><strong>What Bot Lab checks:</strong> token validity, exact hostname and exact action. It still blocks nothing.</p>
+        <div id="turnstile-widget"></div>
+        <button id="verify-turnstile" type="button" disabled>Verify token server-side</button>
+        <p id="turnstile-output" class="output" aria-live="polite">Checking configuration…</p>
+      </section>
+
+      <section id="comparison" class="lab-card card-wide" aria-labelledby="report-heading">
+        <div class="section-head">
+          <div><span class="step-number">04</span><div><p class="mini-label">Aggregate evidence</p><h2 id="report-heading">Compare repeated runs</h2></div></div>
+          <button id="export-report" type="button">Export aggregate JSON</button>
+        </div>
+        <p class="section-copy">After two runs in a context, Bot Lab shows stability and timing without exposing fingerprint or session tags.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Context</th><th>Runs</th><th>Sessions</th><th>Distinct tags</th><th>Repeat stability</th><th>Median collection</th><th>Webdriver</th><th>BotD detected</th><th>Verified agent</th></tr></thead>
+            <tbody id="report-body"><tr><td colspan="9">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <p id="report-status" class="output" aria-live="polite">Loading comparison window…</p>
+      </section>
+
+      <section id="shadow" class="lab-card card-wide" aria-labelledby="shadow-heading">
+        <div class="section-head">
+          <div><span class="step-number">05</span><div><p class="mini-label">No enforcement</p><h2 id="shadow-heading">See how weak signals score</h2></div></div>
+          <button id="export-shadow-report" type="button">Export shadow JSON</button>
+        </div>
+        <p class="section-copy">A transparent ruleset scores observations, while your declared context is used only afterward to measure mistakes. Nothing is blocked, delayed or challenged.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Context</th><th>Runs</th><th>Mean score</th><th>Maximum</th><th>Would review</th><th>Rule hits</th></tr></thead>
+            <tbody id="shadow-body"><tr><td colspan="6">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <p id="shadow-status" class="output" aria-live="polite">Loading shadow evaluation…</p>
+      </section>
+
+      <section id="defences" class="lab-card card-wide" aria-labelledby="defences-heading">
+        <div class="section-head">
+          <div><span class="step-number">06</span><div><p class="mini-label">Layered protection</p><h2 id="defences-heading">See four defences working together</h2></div></div>
+          <a class="button-link" href="/protected-demo">Open the challenge demo</a>
+        </div>
+        <p class="section-copy">Each layer answers a different question. No single signal is treated as proof that a visitor is human or automated.</p>
+        <div class="defence-grid">
+          <article><span>Browser</span><h3>BotD</h3><p>Checks browser-side automation indicators and reports its result separately.</p></article>
+          <article><span>Request</span><h3>Coraza rules</h3><p>Inspects requests for common web attacks through CrowdSec AppSec.</p></article>
+          <article><span>History</span><h3>CrowdSec</h3><p>Makes short-lived local decisions from repeated suspicious activity.</p></article>
+          <article><span>Challenge</span><h3>Anubis</h3><p>Protects the dedicated demo route with a proof-of-work challenge.</p></article>
+        </div>
+        <div class="privacy-note"><span aria-hidden="true">◎</span><p><strong>Local security processing.</strong> The gateway may briefly use your IP address to recognise repeated abusive traffic. It stays inside this homelab, is excluded from Bot Lab reports, is not shared with CrowdSec's community service, and expires within 24 hours.</p></div>
+      </section>
+
+      <section class="lab-card card-wide stats-card" aria-labelledby="stats-heading">
+        <div class="section-head"><div><span class="step-number">07</span><div><p class="mini-label">Temporary state</p><h2 id="stats-heading">Live experiment window</h2></div></div></div>
+        <p class="section-copy">These are aggregate counters only. A restart clears them and invalidates outstanding challenges.</p>
+        <pre id="stats-output" class="output">Loading…</pre>
+      </section>
+    </main>
+
+    <footer inert><strong>Bot Lab</strong><span>Experiment data: 15 minutes · local security addresses: at most 24 hours · no community IP sharing · Turnstile loads only after explicit action</span></footer>
+  </body>
+</html>

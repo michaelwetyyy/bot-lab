@@ -1,0 +1,146 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bot-lab-crowdsec
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://crowdsecurity.github.io/helm-charts
+    chart: crowdsec
+    targetRevision: 0.24.0
+    helm:
+      releaseName: crowdsec
+      values: |
+        container_runtime: containerd
+        image:
+          repository: crowdsecurity/crowdsec
+          pullPolicy: IfNotPresent
+          tag: "v1.7.8@sha256:2f527c9bb8b367120eb08b82890aa912ce96bfa1ada93dda0721700e4b4e0dde"
+          kubectl:
+            repository: alpine/kubectl
+            tag: "1.35.0"
+            pullPolicy: IfNotPresent
+
+        secrets:
+          externalSecret:
+            name: bot-lab-security
+            csLapiSecretKey: crowdsecLapiSecret
+            registrationTokenKey: crowdsecRegistrationToken
+
+        config:
+          profiles.yaml: |
+            name: bot_lab_short_local_remediation
+            filters:
+              - Alert.Remediation == true && Alert.GetScope() == "Ip"
+            decisions:
+              - type: ban
+                duration: 4h
+            on_success: break
+          config.yaml.local: |
+            db_config:
+              log_level: error
+              flush:
+                max_items: 1000
+                max_age: 24h
+            api:
+              server:
+                log_level: error
+                online_client:
+                  credentials_path: /etc/crowdsec/online_api_credentials.yaml
+                  sharing: false
+                auto_registration:
+                  enabled: true
+                  token: "${REGISTRATION_TOKEN}"
+                  allowed_ranges:
+                    - "127.0.0.1/32"
+                    - "192.0.2.0/24" # Replace with the cluster Pod CIDR.
+
+        agent:
+          enabled: false
+
+        lapi:
+          enabled: true
+          replicas: 1
+          env:
+            - name: DISABLE_AGENT
+              value: "true"
+            - name: DISABLE_ONLINE_API
+              value: "false"
+            - name: BOUNCER_KEY_bot_lab
+              valueFrom:
+                secretKeyRef:
+                  name: bot-lab-security
+                  key: crowdsecBouncerKey
+          persistentVolume:
+            data:
+              enabled: false
+            config:
+              enabled: true
+              size: 100Mi
+              storageClassName: ceph-block
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          metrics:
+            serviceMonitor:
+              enabled: false
+            podMonitor:
+              enabled: false
+
+        appsec:
+          enabled: true
+          replicas: 1
+          acquisitions:
+            - source: appsec
+              listen_addr: "0.0.0.0:7422"
+              path: /
+              appsec_config: crowdsecurity/crs-vpatch
+              labels:
+                type: appsec
+          configs:
+            bot-lab-crs-vpatch.yaml: |
+              name: crowdsecurity/crs-vpatch
+              default_remediation: ban
+              log_level: error
+              inband_rules:
+                - crowdsecurity/base-config
+                - crowdsecurity/crs
+                - crowdsecurity/vpatch-*
+          env:
+            - name: COLLECTIONS
+              value: "crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-crs"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          metrics:
+            enabled: true
+            serviceMonitor:
+              enabled: false
+            podMonitor:
+              enabled: false
+          wait_for_lapi:
+            image:
+              repository: busybox
+              pullPolicy: IfNotPresent
+              tag: "1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0"
+
+        tls:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: bot-lab
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

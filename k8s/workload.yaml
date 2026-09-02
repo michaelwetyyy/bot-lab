@@ -1,0 +1,396 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bot-lab-anubis-policy
+  namespace: bot-lab
+data:
+  policy.yaml: |
+    bots:
+      - name: allow-health
+        path_regex: ^/healthz$
+        action: ALLOW
+      - name: allow-api-and-assets
+        path_regex: ^/(api(?:/.*)?|assets/.*|app\.css|robots\.txt)$
+        action: ALLOW
+      - name: allow-lab-root
+        path_regex: ^/$
+        action: ALLOW
+      - name: weigh-protected-demo
+        path_regex: ^/protected-demo(?:/.*)?$
+        action: WEIGH
+        weight:
+          adjust: 10
+      - name: weigh-obvious-automation
+        user_agent_regex: (?i:bot|crawler|spider|scrapy|curl|wget)
+        action: WEIGH
+        weight:
+          adjust: 20
+    thresholds:
+      - name: allow-unweighted
+        expression: weight <= 0
+        action: ALLOW
+      - name: challenge-demo-browser
+        expression:
+          all:
+            - weight > 0
+            - weight < 30
+        action: CHALLENGE
+        challenge:
+          algorithm: fast
+          difficulty: 2
+      - name: challenge-demo-automation
+        expression: weight >= 30
+        action: CHALLENGE
+        challenge:
+          algorithm: fast
+          difficulty: 4
+    honeypot:
+      enabled: true
+      implementation: naive
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot-lab-app
+  namespace: bot-lab
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bot-lab-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bot-lab-app
+        app.kubernetes.io/part-of: bot-lab
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bot-lab
+          image: ghcr.io/michaelwetyyy/bot-lab@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: TRUST_CLOUDFLARE
+              value: "true"
+            - name: ALTCHA_COST
+              value: "750"
+            - name: TURNSTILE_SITEKEY
+              value: "REPLACE_WITH_PUBLIC_SITEKEY"
+            - name: TURNSTILE_EXPECTED_HOSTNAME
+              value: "botlab.example.com"
+            - name: TURNSTILE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bot-lab-turnstile
+                  key: TURNSTILE_SECRET_KEY
+            - name: BOT_LAB_VERIFIED_AGENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: bot-lab-security
+                  key: verifiedAgentSecret
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 15
+            periodSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 20m
+              memory: 48Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+          volumeMounts:
+            - name: runtime
+              mountPath: /tmp
+      volumes:
+        - name: runtime
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+      terminationGracePeriodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bot-lab-app
+  namespace: bot-lab
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bot-lab-app
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot-lab-anubis
+  namespace: bot-lab
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bot-lab-anubis
+  template:
+    metadata:
+      annotations:
+        bot-lab.example/anubis-policy-revision: "1"
+      labels:
+        app.kubernetes.io/name: bot-lab-anubis
+        app.kubernetes.io/part-of: bot-lab
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: anubis
+          image: ghcr.io/techarohq/anubis:v1.27.0@sha256:8828275668b7bc675679f100970f9714f731388fbbf66ae94de8aca952e3fc4a
+          imagePullPolicy: IfNotPresent
+          args:
+            - -bind=:8080
+            - -target=http://bot-lab-app:8080
+            - -policy-fname=/etc/anubis/policy.yaml
+            - -public-url=https://botlab.example.com
+            - -redirect-domains=botlab.example.com
+            - -ed25519-private-key-hex=$(ANUBIS_ED25519_PRIVATE_KEY_HEX)
+            - -cookie-domain=botlab.example.com
+            - -cookie-expiration-time=4h
+            - -cookie-http-only=true
+            - -cookie-same-site=Strict
+            - -cookie-secure=true
+            - -jwt-restriction-header=
+            - -metrics-bind=127.0.0.1:9090
+            - -slog-level=ERROR
+            - -use-simplified-explanation=true
+          env:
+            - name: ANUBIS_ED25519_PRIVATE_KEY_HEX
+              valueFrom:
+                secretKeyRef:
+                  name: bot-lab-security
+                  key: anubisEd25519PrivateKeyHex
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              httpHeaders:
+                - name: X-Real-IP
+                  value: 192.0.2.1
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              httpHeaders:
+                - name: X-Real-IP
+                  value: 192.0.2.1
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              httpHeaders:
+                - name: X-Real-IP
+                  value: 192.0.2.1
+            periodSeconds: 30
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/anubis/policy.yaml
+              subPath: policy.yaml
+              readOnly: true
+            - name: runtime
+              mountPath: /tmp
+      volumes:
+        - name: policy
+          configMap:
+            name: bot-lab-anubis-policy
+        - name: runtime
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+      terminationGracePeriodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bot-lab-anubis
+  namespace: bot-lab
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bot-lab-anubis
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bot-lab
+  namespace: bot-lab
+  annotations:
+    bot-lab.example/release-state: replace-before-deploy
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bot-lab
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bot-lab
+        app.kubernetes.io/part-of: bot-lab
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gateway
+          image: ghcr.io/michaelwetyyy/bot-lab-gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CROWDSEC_BOUNCER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bot-lab-security
+                  key: crowdsecBouncerKey
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 45
+            periodSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+          volumeMounts:
+            - name: runtime
+              mountPath: /data
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: runtime
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+      terminationGracePeriodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bot-lab
+  namespace: bot-lab
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bot-lab
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

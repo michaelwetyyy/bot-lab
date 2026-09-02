@@ -1,0 +1,32 @@
+{
+  "name": "bot-lab",
+  "version": "0.6.2",
+  "private": true,
+  "type": "module",
+  "description": "A privacy-bounded browser fingerprint and proof-of-work experiment lab.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node src/server.mjs",
+    "test": "node --test",
+    "check": "npm run build && npm test",
+    "campaign:local": "node scripts/labelled-browser-campaign.mjs",
+    "campaign:redblue": "node scripts/labelled-browser-campaign.mjs",
+    "evaluate:defenses": "node scripts/defense-evaluation.mjs",
+    "smoke:coraza": "node scripts/coraza-shadow-smoke.mjs",
+    "smoke:coraza:enforce": "BOT_LAB_CORAZA_MODE=On node scripts/coraza-shadow-smoke.mjs",
+    "smoke:public": "node scripts/public-smoke.mjs"
+  },
+  "dependencies": {
+    "@fingerprintjs/botd": "2.0.0",
+    "@fingerprintjs/fingerprintjs": "5.2.0",
+    "altcha": "3.2.2",
+    "altcha-lib": "2.4.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright-core": "1.62.1"
+  }
+}

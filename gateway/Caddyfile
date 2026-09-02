@@ -1,0 +1,37 @@
+{
+	admin off
+	auto_https off
+	order crowdsec first
+	order appsec after crowdsec
+	log {
+		output discard
+	}
+	servers {
+		# Replace this documentation-only range with the Pod CIDR used by your cluster.
+		trusted_proxies static 192.0.2.0/24
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+		trusted_proxies_strict
+	}
+	crowdsec {
+		api_url http://crowdsec-service.bot-lab.svc.cluster.local:8080
+		api_key {env.CROWDSEC_BOUNCER_KEY}
+		ticker_interval 15s
+		appsec_url http://crowdsec-appsec-service.bot-lab.svc.cluster.local:7422
+		appsec_max_body_bytes 32768
+		appsec_timeout 2s
+		appsec_fail_open
+	}
+}
+
+:8080 {
+	route {
+		crowdsec
+		appsec
+		reverse_proxy http://bot-lab-anubis.bot-lab.svc.cluster.local:8080 {
+			header_up X-Real-IP 192.0.2.1
+		}
+	}
+	log {
+		output discard
+	}
+}

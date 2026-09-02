@@ -1,0 +1,44 @@
+bots:
+  - name: allow-health
+    path_regex: ^/healthz$
+    action: ALLOW
+  - name: allow-api-and-assets
+    path_regex: ^/(api(?:/.*)?|assets/.*|app\.css|robots\.txt)$
+    action: ALLOW
+  - name: allow-lab-root
+    path_regex: ^/$
+    action: ALLOW
+  - name: weigh-protected-demo
+    path_regex: ^/protected-demo(?:/.*)?$
+    action: WEIGH
+    weight:
+      adjust: 10
+  - name: weigh-obvious-automation
+    user_agent_regex: (?i:bot|crawler|spider|scrapy|curl|wget)
+    action: WEIGH
+    weight:
+      adjust: 20
+
+thresholds:
+  - name: allow-unweighted
+    expression: weight <= 0
+    action: ALLOW
+  - name: challenge-demo-browser
+    expression:
+      all:
+        - weight > 0
+        - weight < 30
+    action: CHALLENGE
+    challenge:
+      algorithm: fast
+      difficulty: 2
+  - name: challenge-demo-automation
+    expression: weight >= 30
+    action: CHALLENGE
+    challenge:
+      algorithm: fast
+      difficulty: 4
+
+honeypot:
+  enabled: true
+  implementation: naive
