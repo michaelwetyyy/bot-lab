@@ -41,6 +41,19 @@ placeholders and must be replaced before use.
   unavailable protocol evidence—never the protocol or timing values. Cache,
   service-worker and privacy-mediated responses may also appear opaque.
 - A pinned open-source BotD baseline evaluated separately from the custom score.
+- A unified tri-state adapter report that keeps custom shadow, BotD, bot-signal,
+  gateway evaluations and optional comparators independent instead of merging
+  them into an opaque score.
+- The exact self-hosted `bot-signal` v2.0.14 instant browser layer, with no
+  telemetry, external services, IP/TLS/reputation inputs or effect on the
+  custom score. Its observed detector misses and mobile-shaped false positive
+  remain visible limitations rather than hidden behind a combined verdict.
+- Optional `bot-signal` behavior observation starts only after an explicit
+  button press. Raw paths and typing-event samples remain in page memory; only
+  a tri-state and closed upstream category names reach the server.
+- A pinned Rebrowser compatibility record remains unavailable and unshipped
+  because the reviewed revision lacks a complete licence/package/runtime
+  boundary suitable for this public self-hosted application.
 - Optional short-lived, nonce-bound HMAC proof for known-good first-party
   automation without bypassing detection or enabling enforcement.
 - A repeatable labelled browser campaign with adaptive plateau stopping across
@@ -60,7 +73,9 @@ placeholders and must be replaced before use.
   and bounded interaction timing/count summaries for application-layer study.
 - An explicitly loaded Cloudflare Turnstile comparison with mandatory server-
   side Siteverify plus expected hostname and action checks.
-- Restrictive browser security headers and no third-party runtime requests.
+- Restrictive browser security headers and no passive third-party runtime
+  requests. FingerprintJS monitoring is disabled and ALTCHA assets are
+  self-hosted, so the CSP needs neither `unsafe-inline` nor `unsafe-eval`.
 - Crawl-friendly `robots.txt` paired with response-level `noindex`, so polite
   red-team clients can participate without making the lab search-indexable.
 
@@ -84,10 +99,22 @@ enabling enforcement.
 after three identical aggregate signatures or after five attempts. It emits no visitor, fingerprint
 or session identifiers and leaves enforcement off.
 
+`npm run campaign:detectors:controls` compares fresh headed unbranded Chromium,
+Chrome, Opera and a mobile-shaped ordinary control. It exports only aggregate
+tri-state and closed-category outcomes and fails if passive external browser
+requests occur.
+
 `npm run evaluate:defenses` runs the complete labelled campaign against the local browser matrix and
 the authorised homelab deployment. It uses only RFC 5737 addresses for in-cluster probes, requires
 three matching outcomes per scenario, removes every temporary CrowdSec decision and emits no
-identifiers.
+identifiers. CrowdSec, Coraza/CRS and Anubis results use the independent
+tri-state adapter shape while remaining aggregate gateway evidence.
+
+`GET /api/detector-report` returns every layer independently with provenance,
+availability, aggregate outcomes and explicit limitations. Declared context
+groups predictions only after detection. The report contains no identifiers,
+raw components, request headers, stacks, behavior paths, typed content, IP
+addresses or TLS data, and every adapter remains non-enforcing.
 
 The service listens on port `8080` by default. Set `PORT` and `HOST` for a
 different local binding. `ALTCHA_COST` controls PBKDF2 work; the default is
@@ -108,7 +135,7 @@ flowchart LR
     S --> P[Ephemeral experiment state]
     B -->|explicit run| F[FingerprintJS in browser]
     F -->|identifier + summary| S
-    B -->|browser-side baseline| BD[BotD]
+    B -->|independent browser baselines| BD[BotD and bot-signal]
     B -->|fetch, solve, submit| AC[ALTCHA challenge]
     AC --> S
 ```

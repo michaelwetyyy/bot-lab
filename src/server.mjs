@@ -7,6 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { createChallenge, verifySolution } from 'altcha-lib';
 import { deriveKey } from 'altcha-lib/algorithms/pbkdf2';
 
+import {
+  BOT_SIGNAL_BEHAVIOR_CATEGORIES,
+  BOT_SIGNAL_INSTANT_CATEGORIES,
+  buildDetectorReport,
+  sanitizeAdapterResult,
+} from './detector-adapters.mjs';
+
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const PUBLIC = path.join(ROOT, 'public');
 const MAX_BODY_BYTES = 32 * 1024;
@@ -129,6 +136,7 @@ function staticPath(pathname) {
   const allowed = new Map([
     ['/protected-demo', 'protected-demo.html'],
     ['/app.css', 'app.css'],
+    ['/assets/altcha-v3-2-2.css', 'assets/altcha-v3-2-2.css'],
     ['/robots.txt', 'robots.txt'],
     ['/assets/app-v6-2.js', 'assets/app-v6-2.js'],
   ]);
@@ -140,7 +148,7 @@ function addSecurityHeaders(response) {
   response.setHeader('content-security-policy', [
     "default-src 'none'",
     "script-src 'self' https://challenges.cloudflare.com",
-    "style-src 'self' 'unsafe-inline'",
+    "style-src 'self'",
     "connect-src 'self' https://challenges.cloudflare.com",
     "img-src 'self' data:",
     "worker-src 'self' blob:",
@@ -206,6 +214,7 @@ export function createBotLab(options = {}) {
   });
   const issued = new Map();
   const observations = [];
+  const detectorObservations = [];
   const rateBuckets = new Map();
   const verifiedAgentNonces = new Map();
   const counters = {
@@ -336,6 +345,21 @@ export function createBotLab(options = {}) {
 
   const pruneObservations = (requestNow) => {
     while (observations[0]?.expiresAt <= requestNow) observations.shift();
+    while (detectorObservations[0]?.expiresAt <= requestNow) detectorObservations.shift();
+  };
+
+  const detectorReport = (requestNow) => {
+    pruneObservations(requestNow);
+    return {
+      generatedAt: new Date(requestNow).toISOString(),
+      windowMinutes: OBSERVATION_TTL_MS / 60_000,
+      ...buildDetectorReport({
+        observations,
+        behaviorObservations: detectorObservations,
+        contexts: EXPERIMENT_CONTEXTS,
+        turnstileEnabled: Boolean(turnstileSitekey && turnstileSecretKey),
+      }),
+    };
   };
 
   const experimentReport = (requestNow) => {
@@ -683,6 +707,10 @@ export function createBotLab(options = {}) {
               ? (BOTD_KINDS.has(body.botd?.kind) ? body.botd.kind : 'unknown')
               : null,
           },
+          botSignalInstant: sanitizeAdapterResult(
+            body.botSignalInstant,
+            BOT_SIGNAL_INSTANT_CATEGORIES,
+          ),
           verifiedAgent: verifyAgentProof(request, requestUrl.pathname, requestNow),
           interaction: {
             pageAgeMs: Math.round(safeNumber(body.interaction?.pageAgeMs, 0, 3_600_000)),
@@ -713,6 +741,30 @@ export function createBotLab(options = {}) {
         });
       }
 
+      if (request.method === 'POST' && requestUrl.pathname === '/api/detector-observe') {
+        if (!fixedWindowAllowed(rateBuckets, `detector-observe:${requester}`, 12, 60_000, requestNow)) {
+          response.setHeader('retry-after', '60');
+          return json(response, 429, { error: 'detector observation rate limit reached' });
+        }
+        readSession(request, requestNow);
+        const body = await readJson(request);
+        if (body.adapter !== 'bot-signal-behavior') throw error(400, 'unsupported detector adapter');
+        const observation = {
+          recordedAt: new Date(requestNow).toISOString(),
+          expiresAt: requestNow + OBSERVATION_TTL_MS,
+          context: EXPERIMENT_CONTEXTS.includes(body.context) ? body.context : 'unlabelled',
+          result: sanitizeAdapterResult(body.result, BOT_SIGNAL_BEHAVIOR_CATEGORIES),
+        };
+        detectorObservations.push(observation);
+        while (detectorObservations.length > MAX_OBSERVATIONS) detectorObservations.shift();
+        return json(response, 201, {
+          stored: true,
+          retentionSeconds: OBSERVATION_TTL_MS / 1000,
+          observation: { ...observation, expiresAt: undefined },
+          enforcement: false,
+        });
+      }
+
       if (request.method === 'GET' && requestUrl.pathname === '/api/stats') {
         pruneObservations(requestNow);
         response.setHeader('cache-control', 'no-store');
@@ -729,6 +781,10 @@ export function createBotLab(options = {}) {
 
       if (request.method === 'GET' && requestUrl.pathname === '/api/shadow-report') {
         return json(response, 200, shadowReport(requestNow));
+      }
+
+      if (request.method === 'GET' && requestUrl.pathname === '/api/detector-report') {
+        return json(response, 200, detectorReport(requestNow));
       }
 
       if (request.method === 'GET' || request.method === 'HEAD') {

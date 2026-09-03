@@ -124,6 +124,7 @@ async function collectObservation(page) {
       .map((item) => [item.querySelector('dt')?.textContent.trim(), item.querySelector('dd')?.textContent.trim()]));
     const scoreMatch = facts['Shadow score']?.match(/^(\d+)\s*(.*)$/s);
     const botdText = facts['Open-source BotD'] || '';
+    const botSignalText = facts['bot-signal instant'] || '';
     const history = JSON.parse(sessionStorage.getItem('botLabHistory') || '[]');
     return {
       componentCount: Number.parseInt(facts.Components, 10),
@@ -133,6 +134,13 @@ async function collectObservation(page) {
       botd: botdText.startsWith('Detected:')
         ? { available: true, detected: true, kind: botdText.slice(9).split(/\s/)[0] || 'unknown' }
         : { available: !botdText.startsWith('Unavailable'), detected: false },
+      botSignalInstant: {
+        status: ['detected', 'clean', 'unavailable'].find((status) => botSignalText.startsWith(status))
+          || 'unavailable',
+        categories: botSignalText.split(/\s+/).slice(1).join(' ')
+          .split('·')[0].trim().replace('no categories triggered', '')
+          .split(/,\s*/).filter(Boolean).sort(),
+      },
       webdriverReported: navigator.webdriver === true,
       stableFingerprint: new Set(history.map((entry) => entry.visitorId)).size === 1,
       verifiedKnownGood: facts['Known-good proof']?.startsWith('Verified first-party automation') === true,
@@ -174,6 +182,7 @@ async function runCondition(base, browser, condition) {
       shadowScore: observation.shadowScore,
       shadowRules: observation.shadowRules,
       botd: observation.botd,
+      botSignalInstant: observation.botSignalInstant,
       webdriverReported: observation.webdriverReported,
     }));
     if (run >= MIN_RUNS && plateauReached(signatures, PLATEAU_WINDOW)) break;
@@ -196,6 +205,7 @@ async function runCondition(base, browser, condition) {
       shadowScore: finalObservation.shadowScore,
       shadowRules: finalObservation.shadowRules,
       botd: finalObservation.botd,
+      botSignalInstant: finalObservation.botSignalInstant,
       webdriverReported: finalObservation.webdriverReported,
       verifiedKnownGood: finalObservation.verifiedKnownGood,
     },
@@ -241,6 +251,7 @@ try {
 
   const comparison = await fetch(`${base}/api/report`).then((response) => response.json());
   const shadow = await fetch(`${base}/api/shadow-report`).then((response) => response.json());
+  const detectors = await fetch(`${base}/api/detector-report`).then((response) => response.json());
   const automation = comparison.contexts.find((context) => context.context === 'authorised-automation');
   const expectedObservations = results.reduce((total, result) => total + result.runs, 0);
   if (!automation?.ready || automation.observations !== expectedObservations
@@ -249,6 +260,11 @@ try {
     throw new Error('campaign aggregate did not match the BotD-evaluated, verified observations');
   }
   if (shadow.enforcement !== false) throw new Error('campaign must remain shadow-only');
+  if (detectors.enforcement !== false) throw new Error('detector adapters must remain non-enforcing');
+  const botSignal = detectors.adapters.find((adapter) => adapter.id === 'bot-signal-instant');
+  if (botSignal?.result.observations !== expectedObservations) {
+    throw new Error('campaign aggregate did not match bot-signal observations');
+  }
 
   const output = {
     campaign: 'repeatable authorised browser-security matrix',
@@ -268,6 +284,12 @@ try {
         automationRecallPercent: shadow.evaluation.automationRecallPercent,
       },
       openSourceBotd: shadow.evaluation.openSourceBotd,
+      botSignalInstant: {
+        observations: botSignal.result.observations,
+        detected: botSignal.result.detected,
+        clean: botSignal.result.clean,
+        unavailable: botSignal.result.unavailable,
+      },
     },
     enforcement: shadow.enforcement,
     identifiersExported: false,

@@ -8,6 +8,7 @@
     <meta name="description" content="A privacy-bounded browser fingerprint and proof-of-work experiment lab.">
     <title>Bot Lab · Browser signals and proof of work</title>
     <link rel="stylesheet" href="/app.css">
+    <link rel="stylesheet" href="/assets/altcha-v3-2-2.css">
     <script type="module" src="/assets/app-v6-2.js"></script>
   </head>
   <body class="entry-gated">
@@ -60,6 +61,7 @@
         <a href="#comparison">Comparison</a>
         <a href="#shadow">Shadow score</a>
         <a href="#defences">Defences</a>
+        <a href="#detectors">Detectors</a>
       </nav>
     </header>
 
@@ -160,8 +162,24 @@
         <div class="privacy-note"><span aria-hidden="true">◎</span><p><strong>Local security processing.</strong> The gateway may briefly use your IP address to recognise repeated abusive traffic. It stays inside this homelab, is excluded from Bot Lab reports, is not shared with CrowdSec's community service, and expires within 24 hours.</p></div>
       </section>
 
+      <section id="detectors" class="lab-card card-wide" aria-labelledby="detectors-heading">
+        <div class="section-head">
+          <div><span class="step-number">07</span><div><p class="mini-label">Independent evidence</p><h2 id="detectors-heading">Compare detector adapters</h2></div></div>
+          <button id="run-behavior-observation" type="button">Start 8-second local behavior sample</button>
+        </div>
+        <p class="section-copy">Each layer keeps its own verdict, provenance and limitations. No super-score is created and enforcement remains off.</p>
+        <p id="behavior-output" class="output" aria-live="polite">Behavior collection is off. It starts only when you press the button; raw movement and typing-event samples stay in this page.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Layer</th><th>Version and provenance</th><th>Availability</th><th>Current window</th><th>Limitations</th></tr></thead>
+            <tbody id="detector-body"><tr><td colspan="5">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <p id="detector-status" class="output" aria-live="polite">Loading independent adapter report…</p>
+      </section>
+
       <section class="lab-card card-wide stats-card" aria-labelledby="stats-heading">
-        <div class="section-head"><div><span class="step-number">07</span><div><p class="mini-label">Temporary state</p><h2 id="stats-heading">Live experiment window</h2></div></div></div>
+        <div class="section-head"><div><span class="step-number">08</span><div><p class="mini-label">Temporary state</p><h2 id="stats-heading">Live experiment window</h2></div></div></div>
         <p class="section-copy">These are aggregate counters only. A restart clears them and invalidates outstanding challenges.</p>
         <pre id="stats-output" class="output">Loading…</pre>
       </section>

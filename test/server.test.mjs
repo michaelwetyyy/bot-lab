@@ -47,6 +47,7 @@ test('health and static responses carry defensive headers', async (t) => {
   assert.equal(page.status, 200);
   assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.match(page.headers.get('content-security-policy'), /frame-src https:\/\/challenges\.cloudflare\.com/);
+  assert.doesNotMatch(page.headers.get('content-security-policy'), /unsafe-inline|unsafe-eval/);
   const pageBody = await page.text();
   assert.match(pageBody, /Browser signals and proof of work/);
   assert.match(pageBody, /Compare repeated runs/);
@@ -54,6 +55,7 @@ test('health and static responses carry defensive headers', async (t) => {
   assert.match(pageBody, /Authorised testing boundary/);
   assert.match(pageBody, /This notice is not access control/);
   assert.match(pageBody, /app-v6-2\.js/);
+  assert.match(pageBody, /altcha-v3-2-2\.css/);
 
   const protectedDemo = await fetch(`${base}/protected-demo`);
   assert.equal(protectedDemo.status, 200);
@@ -72,6 +74,104 @@ test('health and static responses carry defensive headers', async (t) => {
   assert.match(clientBody, /botLabEntryAcknowledged/);
   assert.match(clientBody, /image data hidden in preview/);
   assert.match(clientBody, /navigationProtocolCategory/);
+  assert.match(clientBody, /bot-signal instant/);
+  assert.match(clientBody, /monitoring:!1/);
+  assert.doesNotMatch(clientBody, /https:\/\/.*bot-signal|unpkg\.com|jsdelivr\.net/);
+
+  const altchaCss = await fetch(`${base}/assets/altcha-v3-2-2.css`);
+  assert.equal(altchaCss.status, 200);
+  assert.match(altchaCss.headers.get('content-type'), /^text\/css/);
+});
+
+test('unified detector adapters remain independent, bounded and non-enforcing', async (t) => {
+  const base = await fixture(t);
+  const cookie = await sessionCookie(base);
+  const observationResponse = await fetch(`${base}/api/observe`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'accept-language': 'en-GB',
+      'sec-fetch-site': 'same-origin',
+      cookie,
+    },
+    body: JSON.stringify({
+      visitorId: '12121212121212121212121212121212',
+      componentCount: 42,
+      collectionMs: 100,
+      webdriver: false,
+      touchPoints: 0,
+      viewport: '1280x720',
+      context: 'ordinary',
+      botd: { available: true, bot: false, kind: null },
+      botSignalInstant: {
+        status: 'detected',
+        categories: ['isGpuPlatformMismatch', 'isNavigatorIdentityInconsistent'],
+        renderer: 'private raw renderer',
+        userAgent: 'private raw agent',
+      },
+      interaction: { pageAgeMs: 500, pointerEvents: 1, keyEvents: 0 },
+    }),
+  });
+  assert.equal(observationResponse.status, 201);
+  const observationText = await observationResponse.text();
+  const observation = JSON.parse(observationText).observation;
+  assert.equal(observation.shadowScore, 0);
+  assert.deepEqual(observation.botSignalInstant, {
+    status: 'detected',
+    categories: ['isGpuPlatformMismatch', 'isNavigatorIdentityInconsistent'],
+  });
+  assert.doesNotMatch(observationText, /private raw renderer|private raw agent/);
+
+  const behaviorResponse = await fetch(`${base}/api/detector-observe`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      adapter: 'bot-signal-behavior',
+      context: 'ordinary',
+      result: { status: 'clean', categories: [], trajectory: [[10, 20]], typed: 'private' },
+    }),
+  });
+  assert.equal(behaviorResponse.status, 201);
+  const behaviorText = await behaviorResponse.text();
+  assert.doesNotMatch(behaviorText, /trajectory|typed|private/);
+
+  const reportResponse = await fetch(`${base}/api/detector-report`);
+  assert.equal(reportResponse.status, 200);
+  const reportText = await reportResponse.text();
+  const report = JSON.parse(reportText);
+  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.mode, 'independent-adapters');
+  assert.equal(report.enforcement, false);
+  const custom = report.adapters.find((adapter) => adapter.id === 'custom-shadow');
+  const botSignal = report.adapters.find((adapter) => adapter.id === 'bot-signal-instant');
+  const behavior = report.adapters.find((adapter) => adapter.id === 'bot-signal-behavior');
+  const rebrowser = report.adapters.find((adapter) => adapter.id === 'rebrowser-compatibility-oracle');
+  assert.equal(custom.result.clean, 1);
+  assert.equal(botSignal.result.detected, 1);
+  assert.equal(behavior.result.clean, 1);
+  assert.equal(rebrowser.currentStatus, 'unavailable');
+  assert.match(rebrowser.limitations.join(' '), /no LICENSE file/);
+  assert.match(botSignal.limitations.join(' '), /missed frozen CDP-guarded Red 3\/3/);
+  assert.match(botSignal.limitations.join(' '), /false-positive detected the mobile-shaped ordinary control 3\/3/);
+  assert.doesNotMatch(reportText, /121212121212|private raw|trajectory|typed/);
+});
+
+test('unknown detector categories degrade to unavailable instead of being retained', async (t) => {
+  const base = await fixture(t);
+  const cookie = await sessionCookie(base);
+  const response = await fetch(`${base}/api/detector-observe`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      adapter: 'bot-signal-behavior',
+      context: 'authorised-automation',
+      result: { status: 'detected', categories: ['raw-unbounded-name'] },
+    }),
+  });
+  assert.equal(response.status, 201);
+  const text = await response.text();
+  assert.deepEqual(JSON.parse(text).observation.result, { status: 'unavailable', categories: [] });
+  assert.doesNotMatch(text, /raw-unbounded-name/);
 });
 
 test('a signed proof verifies once and is then rejected as a replay', async (t) => {

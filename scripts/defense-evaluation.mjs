@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { assertAggregateOnly, plateauReached } from './campaign-aggregate.mjs';
+import { gatewayAdapterResults } from '../src/detector-adapters.mjs';
 
 const execFileAsync = promisify(execFile);
 const context = process.env.BOT_LAB_KUBE_CONTEXT || 'homelab';
@@ -225,6 +226,11 @@ try {
       anubis: { browserTierObservations: browserMetricDelta, crawlerTierObservations: crawlerMetricDelta },
       crowdsec: crowdsecMode,
     },
+    adapterResults: gatewayAdapterResults({
+      corazaPassed: scenarios.find((scenario) => scenario.name === 'synthetic-sqli')?.passed === true,
+      crowdsecPassed: scenarios.find((scenario) => scenario.name === 'synthetic-local-decision')?.passed === true,
+      anubisPassed: browserMetricDelta >= MIN_RUNS && crawlerMetricDelta >= MIN_RUNS,
+    }),
     passedScenarios: scenarios.filter((scenario) => scenario.passed).length,
     totalScenarios: scenarios.length,
     passed: scenarios.every((scenario) => scenario.passed),

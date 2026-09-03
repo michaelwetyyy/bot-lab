@@ -1,6 +1,7 @@
 import FingerprintJS from '@fingerprintjs/fingerprintjs';
 import { load as loadBotD } from '@fingerprintjs/botd';
-import 'altcha';
+import { createBehavioralClientDetector, detectInstantClient } from 'bot-signal/browser';
+import 'altcha/external';
 
 const $ = (selector) => document.querySelector(selector);
 const output = $('#fingerprint-output');
@@ -15,6 +16,10 @@ const reportStatus = $('#report-status');
 const contextSelect = $('#experiment-context');
 const shadowBody = $('#shadow-body');
 const shadowStatus = $('#shadow-status');
+const detectorBody = $('#detector-body');
+const detectorStatus = $('#detector-status');
+const behaviorButton = $('#run-behavior-observation');
+const behaviorOutput = $('#behavior-output');
 const loadTurnstileButton = $('#load-turnstile');
 const verifyTurnstileButton = $('#verify-turnstile');
 const turnstileOutput = $('#turnstile-output');
@@ -181,6 +186,25 @@ async function detectBasicAutomation() {
   } catch {
     return { available: false, bot: false, kind: null };
   }
+}
+
+function detectBotSignalInstant() {
+  try {
+    const result = detectInstantClient(window);
+    return {
+      status: result.isLegitClient ? 'clean' : 'detected',
+      categories: result.signals.filter((signal) => signal.triggered).map((signal) => signal.id),
+    };
+  } catch {
+    return { status: 'unavailable', categories: [] };
+  }
+}
+
+function boundedBehaviorResult(result) {
+  return {
+    status: result.isLegitClient ? 'clean' : 'detected',
+    categories: result.signals.filter((signal) => signal.triggered).map((signal) => signal.id),
+  };
 }
 
 function renderComponentRows(components) {
@@ -422,15 +446,37 @@ async function refreshShadowReport() {
   return report;
 }
 
+async function refreshDetectorReport() {
+  const response = await fetch('/api/detector-report', { cache: 'no-store' });
+  if (!response.ok) throw new Error(`detector report request failed (${response.status})`);
+  const report = await response.json();
+  detectorBody.innerHTML = report.adapters.map((adapter) => {
+    const result = adapter.result;
+    const evidence = result.observations
+      ? `${result.detected} detected · ${result.clean} clean · ${result.unavailable} unavailable`
+      : `No current observations · ${adapter.currentStatus}`;
+    return `<tr>
+      <td><strong>${escapeText(adapter.name)}</strong><br><small>${escapeText(adapter.layer)}</small></td>
+      <td>${escapeText(adapter.version)}<br><small>${escapeText(adapter.provenance)}</small></td>
+      <td>${escapeText(adapter.availability)}</td>
+      <td>${escapeText(evidence)}</td>
+      <td>${escapeText(adapter.limitations.join(' '))}</td>
+    </tr>`;
+  }).join('');
+  detectorStatus.textContent = `${report.mode}; ${report.privacy} Enforcement: ${report.enforcement ? 'on' : 'off'}.`;
+  return report;
+}
+
 runButton.addEventListener('click', async () => {
   runButton.disabled = true;
   output.textContent = 'Collecting locally…';
   const started = performance.now();
   try {
     await ensureBrowserSession();
-    fingerprintPromise ||= FingerprintJS.load();
+    fingerprintPromise ||= FingerprintJS.load({ monitoring: false });
     const agent = await fingerprintPromise;
     const [result, botd] = await Promise.all([agent.get(), detectBasicAutomation()]);
+    const botSignalInstant = detectBotSignalInstant();
     const collectionMs = Math.round(performance.now() - started);
     const components = Object.entries(result.components)
       .sort(([left], [right]) => left.localeCompare(right));
@@ -440,6 +486,7 @@ runButton.addEventListener('click', async () => {
       collectionMs,
       confidence: result.confidence?.score ?? null,
       botd,
+      botSignalInstant,
       webdriver: navigator.webdriver === true,
       touchPoints: navigator.maxTouchPoints || 0,
       viewport: `${window.innerWidth}x${window.innerHeight}`,
@@ -468,6 +515,7 @@ runButton.addEventListener('click', async () => {
         <div class="result-item"><dt>Temporary server tag</dt><dd><code>${escapeText(stored.observation.fingerprintTag)}</code></dd></div>
         <div class="result-item"><dt>Shadow score</dt><dd>${stored.observation.shadowScore} <small>${escapeText(stored.observation.shadowRules.join(', ') || 'no rules triggered')}</small></dd></div>
         <div class="result-item"><dt>Open-source BotD</dt><dd>${botd.available ? (botd.bot ? `Detected: ${escapeText(botd.kind || 'unknown')}` : 'No basic automation detected') : 'Unavailable'} <small>Client-reported baseline—not identity or enforcement</small></dd></div>
+        <div class="result-item"><dt>bot-signal instant</dt><dd>${escapeText(botSignalInstant.status)} <small>${escapeText(botSignalInstant.categories.join(', ') || 'no categories triggered')} · independent baseline, never custom score</small></dd></div>
         <div class="result-item"><dt>Known-good proof</dt><dd>${stored.observation.verifiedAgent ? 'Verified first-party automation' : 'Not presented'} <small>Short-lived HMAC proof, separate from detection</small></dd></div>
         <div class="result-item"><dt>Session protection</dt><dd>Signed HttpOnly cookie</dd></div>
         <div class="result-item"><dt>Retention</dt><dd>${stored.retentionSeconds / 60} minutes</dd></div>
@@ -476,10 +524,34 @@ runButton.addEventListener('click', async () => {
     await refreshStats();
     await refreshReport();
     await refreshShadowReport();
+    await refreshDetectorReport();
   } catch (caught) {
     output.textContent = `Fingerprint run failed: ${caught.message}`;
   } finally {
     runButton.disabled = false;
+  }
+});
+
+behaviorButton.addEventListener('click', async () => {
+  behaviorButton.disabled = true;
+  behaviorOutput.textContent = 'Observing locally for 8 seconds… raw movement and typing-event samples are not transmitted.';
+  try {
+    await ensureBrowserSession();
+    const detector = createBehavioralClientDetector({ context: window, minObservationMs: 8_000 });
+    const localResult = await detector.observe(8_000);
+    const result = boundedBehaviorResult(localResult);
+    detector.reset();
+    const stored = await postJson('/api/detector-observe', {
+      adapter: 'bot-signal-behavior',
+      result,
+      context: contextSelect.value,
+    });
+    behaviorOutput.textContent = `${stored.observation.result.status}; categories: ${stored.observation.result.categories.join(', ') || 'none'}. Only this summary left the page; enforcement stayed off.`;
+    await refreshDetectorReport();
+  } catch (caught) {
+    behaviorOutput.textContent = `Behavior observation unavailable: ${caught.message}`;
+  } finally {
+    behaviorButton.disabled = false;
   }
 });
 
@@ -597,4 +669,5 @@ renderHistory();
 refreshStats().catch(() => { statsOutput.textContent = 'Stats unavailable.'; });
 refreshReport().catch(() => { reportStatus.textContent = 'Comparison report unavailable.'; });
 refreshShadowReport().catch(() => { shadowStatus.textContent = 'Shadow report unavailable.'; });
+refreshDetectorReport().catch(() => { detectorStatus.textContent = 'Independent detector report unavailable.'; });
 configureTurnstile().catch(() => { turnstileOutput.textContent = 'Turnstile configuration unavailable.'; });

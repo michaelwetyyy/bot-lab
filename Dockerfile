@@ -22,6 +22,7 @@ COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/public ./public
 COPY --from=build --chown=node:node /app/src/server.mjs ./src/server.mjs
+COPY --from=build --chown=node:node /app/src/detector-adapters.mjs ./src/detector-adapters.mjs
 
 USER node
 EXPOSE 8080
