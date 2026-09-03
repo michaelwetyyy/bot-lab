@@ -71,6 +71,7 @@ test('health and static responses carry defensive headers', async (t) => {
   assert.match(clientBody, /Raw value sent to Bot Lab/);
   assert.match(clientBody, /botLabEntryAcknowledged/);
   assert.match(clientBody, /image data hidden in preview/);
+  assert.match(clientBody, /navigationProtocolCategory/);
 });
 
 test('a signed proof verifies once and is then rejected as a replay', async (t) => {
@@ -285,12 +286,286 @@ test('client-hint coherence retains mismatch booleans only and has zero shadow w
     fetchSite: 'same-origin',
     platformHintMismatch: true,
     mobileHintMismatch: true,
+    browserVersionHintMismatch: false,
+    browserFamilyHintMismatch: false,
   });
   assert.doesNotMatch(text, /Windows NT|macOS/);
 
   const report = await fetch(`${base}/api/shadow-report`).then((result) => result.json());
   assert.equal(report.weights['client-hint-platform-mismatch'], 0);
   assert.equal(report.weights['client-hint-mobile-mismatch'], 0);
+  assert.equal(report.enforcement, false);
+});
+
+test('browser-version coherence distinguishes a stale automation identity from matched controls', async (t) => {
+  const base = await fixture(t);
+  const observe = async ({ context, cookie, visitorId, userAgent, browserHint }) => {
+    const response = await fetch(`${base}/api/observe`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'accept-language': 'en-GB',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': userAgent,
+        'sec-ch-ua': browserHint,
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-ch-ua-mobile': '?0',
+        cookie,
+      },
+      body: JSON.stringify({
+        visitorId,
+        componentCount: 42,
+        collectionMs: 100,
+        webdriver: false,
+        touchPoints: 0,
+        viewport: '1440x900',
+        context,
+        botd: { available: true, bot: false, kind: null },
+        interaction: { pageAgeMs: 500, pointerEvents: 1, keyEvents: 0 },
+      }),
+    });
+    assert.equal(response.status, 201);
+    return response.text();
+  };
+
+  const ordinaryCookie = await sessionCookie(base);
+  const automationCookie = await sessionCookie(base);
+  const matchedHint = '"Chromium";v="141", "Google Chrome";v="141", "Not_A Brand";v="99"';
+  const ordinaryUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0.0.0 Safari/537.36';
+  const staleAutomationUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36';
+
+  for (let index = 0; index < 2; index += 1) {
+    const ordinaryText = await observe({
+      context: 'ordinary',
+      cookie: ordinaryCookie,
+      visitorId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      userAgent: ordinaryUserAgent,
+      browserHint: matchedHint,
+    });
+    const ordinary = JSON.parse(ordinaryText).observation;
+    assert.equal(ordinary.requestEvidence.browserVersionHintMismatch, false);
+    assert.equal(ordinary.requestEvidence.browserFamilyHintMismatch, false);
+    assert.equal(ordinary.shadowScore, 0);
+    assert.deepEqual(ordinary.shadowRules, []);
+
+    const automationText = await observe({
+      context: 'authorised-automation',
+      cookie: automationCookie,
+      visitorId: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      userAgent: staleAutomationUserAgent,
+      browserHint: matchedHint,
+    });
+    const automation = JSON.parse(automationText).observation;
+    assert.equal(automation.requestEvidence.browserVersionHintMismatch, true);
+    assert.equal(automation.requestEvidence.browserFamilyHintMismatch, false);
+    assert.equal(automation.shadowScore, 40);
+    assert.deepEqual(automation.shadowRules, ['client-hint-browser-version-mismatch']);
+
+    for (const rawValue of [ordinaryUserAgent, staleAutomationUserAgent, matchedHint]) {
+      assert.doesNotMatch(ordinaryText, new RegExp(rawValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.doesNotMatch(automationText, new RegExp(rawValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    }
+  }
+
+  const report = await fetch(`${base}/api/shadow-report`).then((response) => response.json());
+  assert.equal(report.weights['client-hint-browser-version-mismatch'], 40);
+  assert.equal(report.evaluation.automationRecallPercent, 100);
+  assert.equal(report.evaluation.falsePositiveRatePercent, 0);
+  assert.equal(report.enforcement, false);
+});
+
+test('browser-family coherence catches Chromium claiming Firefox or Safari without treating missing hints as mismatch', async (t) => {
+  const base = await fixture(t);
+  const chromeHint = '"Chromium";v="141", "Google Chrome";v="141", "Not_A Brand";v="99"';
+  const profiles = [
+    {
+      context: 'ordinary',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0.0.0 Safari/537.36',
+      browserHint: chromeHint,
+      expectedRules: [],
+    },
+    {
+      context: 'ordinary',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+      expectedRules: [],
+    },
+    {
+      context: 'ordinary',
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.6 Safari/605.1.15',
+      expectedRules: [],
+    },
+    {
+      context: 'ordinary',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141.0.0.0 Safari/537.36',
+      expectedRules: [],
+    },
+    {
+      context: 'authorised-automation',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36',
+      browserHint: chromeHint,
+      expectedRules: ['client-hint-browser-version-mismatch'],
+    },
+    {
+      context: 'authorised-automation',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+      browserHint: chromeHint,
+      expectedRules: ['client-hint-browser-family-mismatch'],
+    },
+    {
+      context: 'authorised-automation',
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.6 Safari/605.1.15',
+      browserHint: chromeHint,
+      expectedRules: ['client-hint-browser-family-mismatch'],
+    },
+    {
+      context: 'authorised-automation',
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/131.0.0.0 Safari/537.36',
+      browserHint: chromeHint,
+      expectedRules: ['client-hint-browser-version-mismatch'],
+    },
+  ];
+
+  for (const [index, profile] of profiles.entries()) {
+    const cookie = await sessionCookie(base);
+    const headers = {
+      'content-type': 'application/json',
+      'accept-language': 'en-GB',
+      'sec-fetch-site': 'same-origin',
+      'user-agent': profile.userAgent,
+      'sec-ch-ua-platform': profile.userAgent.includes('Macintosh') ? '"macOS"'
+        : profile.userAgent.includes('Linux') ? '"Linux"' : '"Windows"',
+      'sec-ch-ua-mobile': '?0',
+      cookie,
+    };
+    if (profile.browserHint) headers['sec-ch-ua'] = profile.browserHint;
+    const response = await fetch(`${base}/api/observe`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        visitorId: `${String(index + 1).padStart(2, '0')}${'a'.repeat(30)}`,
+        componentCount: 42,
+        collectionMs: 100,
+        webdriver: false,
+        touchPoints: 0,
+        viewport: '1440x900',
+        context: profile.context,
+        botd: { available: true, bot: false, kind: null },
+        interaction: { pageAgeMs: 500, pointerEvents: 1, keyEvents: 0 },
+      }),
+    });
+    assert.equal(response.status, 201);
+    const text = await response.text();
+    const observation = JSON.parse(text).observation;
+    assert.equal(observation.requestEvidence.browserFamilyHintMismatch,
+      profile.expectedRules.includes('client-hint-browser-family-mismatch'));
+    assert.equal(observation.shadowScore, profile.expectedRules.length ? 40 : 0);
+    assert.deepEqual(observation.shadowRules, profile.expectedRules);
+    assert.doesNotMatch(text, /Firefox\/133|Version\/17\.6|Chrome\/131|"Chromium"/);
+  }
+
+  const report = await fetch(`${base}/api/shadow-report`).then((response) => response.json());
+  assert.equal(report.weights['client-hint-browser-family-mismatch'], 40);
+  assert.equal(report.evaluation.labelledAutomation, 4);
+  assert.equal(report.evaluation.automationRecallPercent, 100);
+  assert.equal(report.evaluation.labelledNonAutomation, 4);
+  assert.equal(report.evaluation.falsePositiveRatePercent, 0);
+  assert.equal(report.enforcement, false);
+});
+
+test('invalidated window geometry evidence is neither retained nor scored', async (t) => {
+  const base = await fixture(t);
+  const cookie = await sessionCookie(base);
+  const response = await fetch(`${base}/api/observe`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'accept-language': 'en-GB',
+      'sec-fetch-site': 'same-origin',
+      cookie,
+    },
+    body: JSON.stringify({
+      visitorId: '20202020202020202020202020202020',
+      componentCount: 42,
+      collectionMs: 100,
+      webdriver: false,
+      touchPoints: 5,
+      viewport: '390x844',
+      context: 'ordinary',
+      botd: { available: true, bot: false, kind: null },
+      interaction: { pageAgeMs: 500, pointerEvents: 1, keyEvents: 0 },
+      runtimeEvidence: { windowChromeInset: 'no-inset' },
+    }),
+  });
+  assert.equal(response.status, 201);
+  const text = await response.text();
+  const observation = JSON.parse(text).observation;
+  assert.deepEqual(observation.runtimeEvidence, { navigationProtocolCategory: 'unavailable' });
+  assert.equal(observation.shadowScore, 0);
+  assert.deepEqual(observation.shadowRules, []);
+  assert.doesNotMatch(text, /no-inset/);
+
+  const report = await fetch(`${base}/api/shadow-report`).then((result) => result.json());
+  assert.equal(report.weights['window-chrome-no-inset'], undefined);
+  assert.equal(report.enforcement, false);
+});
+
+test('navigation protocol category separates opaque routing from recognised and missing controls', async (t) => {
+  const base = await fixture(t);
+  const profiles = [
+    { context: 'ordinary', supplied: 'recognised', expected: 'recognised', score: 0 },
+    { context: 'ordinary', supplied: 'recognised', expected: 'recognised', score: 0 },
+    { context: 'ordinary', expected: 'unavailable', score: 0 },
+    {
+      context: 'ordinary',
+      supplied: 'unexpected-private-detail',
+      expected: 'unavailable',
+      score: 0,
+    },
+    { context: 'authorised-automation', supplied: 'opaque', expected: 'opaque', score: 40 },
+    { context: 'authorised-automation', supplied: 'opaque', expected: 'opaque', score: 40 },
+  ];
+
+  for (const [index, profile] of profiles.entries()) {
+    const cookie = await sessionCookie(base);
+    const body = {
+      visitorId: `${String(index + 30).padStart(2, '0')}${'b'.repeat(30)}`,
+      componentCount: 42,
+      collectionMs: 100,
+      webdriver: false,
+      touchPoints: profile.context === 'ordinary' ? 5 : 0,
+      viewport: profile.context === 'ordinary' ? '390x844' : '1440x900',
+      context: profile.context,
+      botd: { available: true, bot: false, kind: null },
+      interaction: { pageAgeMs: 500, pointerEvents: 1, keyEvents: 0 },
+    };
+    if (profile.supplied) {
+      body.runtimeEvidence = { navigationProtocolCategory: profile.supplied };
+    }
+    const response = await fetch(`${base}/api/observe`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'accept-language': 'en-GB',
+        'sec-fetch-site': 'same-origin',
+        cookie,
+      },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 201);
+    const text = await response.text();
+    const observation = JSON.parse(text).observation;
+    assert.equal(observation.runtimeEvidence.navigationProtocolCategory, profile.expected);
+    assert.equal(observation.shadowScore, profile.score);
+    assert.deepEqual(observation.shadowRules,
+      profile.score ? ['navigation-protocol-opaque'] : []);
+    assert.doesNotMatch(text, /unexpected-private-detail/);
+  }
+
+  const report = await fetch(`${base}/api/shadow-report`).then((result) => result.json());
+  assert.equal(report.weights['window-chrome-no-inset'], undefined);
+  assert.equal(report.weights['navigation-protocol-opaque'], 40);
+  assert.equal(report.evaluation.automationRecallPercent, 100);
+  assert.equal(report.evaluation.falsePositiveRatePercent, 0);
   assert.equal(report.enforcement, false);
 });
 

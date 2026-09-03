@@ -38,6 +38,9 @@ const SHADOW_RULES = {
   'no-interaction-before-run': 10,
   'client-hint-platform-mismatch': 0,
   'client-hint-mobile-mismatch': 0,
+  'client-hint-browser-version-mismatch': 40,
+  'client-hint-browser-family-mismatch': 40,
+  'navigation-protocol-opaque': 40,
 };
 
 const MIME = new Map([
@@ -264,6 +267,10 @@ export function createBotLab(options = {}) {
       ? request.headers['sec-ch-ua-platform'].replaceAll('"', '').trim()
       : '';
     const mobileHint = request.headers['sec-ch-ua-mobile'];
+    const browserHint = typeof request.headers['sec-ch-ua'] === 'string'
+      && request.headers['sec-ch-ua'].length <= 512
+      ? request.headers['sec-ch-ua']
+      : '';
     const platformPatterns = [
       ['Android', /Android/i],
       ['Windows', /Windows/i],
@@ -274,6 +281,13 @@ export function createBotLab(options = {}) {
     ];
     const userAgentPlatform = platformPatterns.find(([, pattern]) => pattern.test(userAgent))?.[0];
     const userAgentMobile = /Mobile|Android|iPhone|iPad/i.test(userAgent);
+    const chromeMajor = /(?:Chrome|CriOS)\/(\d{1,3})\b/i.exec(userAgent)?.[1];
+    const hintedChromiumMajors = [...browserHint.matchAll(
+      /"(?:Chromium|Google Chrome)"\s*;\s*v="(\d{1,3})(?:[."])/gi,
+    )].map((match) => match[1]);
+    const claimsFirefox = /(?:Firefox|FxiOS)\/\d/i.test(userAgent);
+    const claimsSafari = /Version\/\d[\d.]*\s+(?:Mobile\/\S+\s+)?Safari\/\d/i.test(userAgent)
+      && !/(?:Chrome|CriOS|Chromium|EdgA?|EdgiOS|OPR|SamsungBrowser)\//i.test(userAgent);
     return {
       userAgentPresent: userAgent.trim().length > 0,
       acceptLanguagePresent: typeof request.headers['accept-language'] === 'string'
@@ -284,6 +298,15 @@ export function createBotLab(options = {}) {
       platformHintMismatch: Boolean(userAgentPlatform && platformHint && userAgentPlatform !== platformHint),
       mobileHintMismatch: ['?0', '?1'].includes(mobileHint)
         && (mobileHint === '?1') !== userAgentMobile,
+      browserVersionHintMismatch: Boolean(
+        chromeMajor
+        && hintedChromiumMajors.length
+        && !hintedChromiumMajors.includes(chromeMajor),
+      ),
+      browserFamilyHintMismatch: Boolean(
+        hintedChromiumMajors.length
+        && (claimsFirefox || claimsSafari),
+      ),
     };
   };
 
@@ -397,6 +420,15 @@ export function createBotLab(options = {}) {
     }
     if (observation.requestEvidence.platformHintMismatch) rules.push('client-hint-platform-mismatch');
     if (observation.requestEvidence.mobileHintMismatch) rules.push('client-hint-mobile-mismatch');
+    if (observation.requestEvidence.browserVersionHintMismatch) {
+      rules.push('client-hint-browser-version-mismatch');
+    }
+    if (observation.requestEvidence.browserFamilyHintMismatch) {
+      rules.push('client-hint-browser-family-mismatch');
+    }
+    if (observation.runtimeEvidence.navigationProtocolCategory === 'opaque') {
+      rules.push('navigation-protocol-opaque');
+    }
     if (observation.interaction.pageAgeMs < 100) rules.push('implausibly-fast-action');
     if (observation.interaction.pointerEvents === 0 && observation.interaction.keyEvents === 0) {
       rules.push('no-interaction-before-run');
@@ -656,6 +688,11 @@ export function createBotLab(options = {}) {
             pageAgeMs: Math.round(safeNumber(body.interaction?.pageAgeMs, 0, 3_600_000)),
             pointerEvents: Math.round(safeNumber(body.interaction?.pointerEvents, 0, 10_000)),
             keyEvents: Math.round(safeNumber(body.interaction?.keyEvents, 0, 10_000)),
+          },
+          runtimeEvidence: {
+            navigationProtocolCategory: ['recognised', 'opaque'].includes(
+              body.runtimeEvidence?.navigationProtocolCategory,
+            ) ? body.runtimeEvidence.navigationProtocolCategory : 'unavailable',
           },
           requestEvidence: requestEvidence(request),
           viewport: typeof body.viewport === 'string' && /^\d{2,5}x\d{2,5}$/.test(body.viewport)

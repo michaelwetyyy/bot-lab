@@ -57,6 +57,21 @@ const pageStartedAt = performance.now();
 const interaction = { pointerEvents: 0, keyEvents: 0 };
 document.addEventListener('pointerdown', () => { interaction.pointerEvents += 1; }, { capture: true });
 document.addEventListener('keydown', () => { interaction.keyEvents += 1; }, { capture: true });
+
+function navigationProtocolCategory() {
+  try {
+    const navigation = performance.getEntriesByType('navigation')[0];
+    if (!navigation || typeof navigation.nextHopProtocol !== 'string') return 'unavailable';
+    const protocol = navigation.nextHopProtocol.trim().toLowerCase();
+    if (!protocol) return 'opaque';
+    return /^(?:http\/(?:0\.9|1\.0|1\.1)|h2|h3(?:-\d+)?|quic)$/.test(protocol)
+      ? 'recognised'
+      : 'opaque';
+  } catch {
+    return 'unavailable';
+  }
+}
+
 let sessionExpiresAt = 0;
 
 const COMPONENT_GUIDE = Object.freeze({
@@ -433,6 +448,9 @@ runButton.addEventListener('click', async () => {
         pageAgeMs: Math.round(performance.now() - pageStartedAt),
         pointerEvents: interaction.pointerEvents,
         keyEvents: interaction.keyEvents,
+      },
+      runtimeEvidence: {
+        navigationProtocolCategory: navigationProtocolCategory(),
       },
     };
     history.push(summary);

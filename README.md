@@ -31,6 +31,15 @@ placeholders and must be replaced before use.
   evaluation and an explicit no-enforcement guarantee.
 - Zero-weight client-hint platform/mobile coherence measurements that retain
   booleans only and cannot change a score or enforcement decision.
+- Shadow-only browser-major and browser-family coherence rules that compare
+  User-Agent and Chromium Client Hints transiently while retaining only bounded
+  mismatch booleans. Missing hints remain unavailable evidence.
+- Invalidated window-inset scoring is removed after an ordinary mobile/touch
+  control reproduced the same shape. WebGL and speech-voice hypotheses also
+  remain unscored because they did not distinguish the tested clients.
+- A shadow-only Navigation Timing category retains only recognised, opaque or
+  unavailable protocol evidence—never the protocol or timing values. Cache,
+  service-worker and privacy-mediated responses may also appear opaque.
 - A pinned open-source BotD baseline evaluated separately from the custom score.
 - Optional short-lived, nonce-bound HMAC proof for known-good first-party
   automation without bypassing detection or enabling enforcement.
