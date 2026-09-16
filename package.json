@@ -24,7 +24,7 @@
     "@fingerprintjs/botd": "2.0.0",
     "@fingerprintjs/fingerprintjs": "5.2.0",
     "altcha": "3.2.2",
-    "altcha-lib": "2.4.0"
+    "altcha-lib": "2.5.0"
   },
   "devDependencies": {
     "bot-signal": "2.0.14",
