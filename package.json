@@ -27,7 +27,7 @@
     "altcha-lib": "2.4.0"
   },
   "devDependencies": {
-    "bot-signal": "2.0.14",
+    "bot-signal": "2.0.17",
     "esbuild": "0.28.2",
     "playwright-core": "1.62.1"
   }
