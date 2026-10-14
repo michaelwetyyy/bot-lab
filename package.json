@@ -23,7 +23,7 @@
   "dependencies": {
     "@fingerprintjs/botd": "2.0.0",
     "@fingerprintjs/fingerprintjs": "5.2.0",
-    "altcha": "3.2.2",
+    "altcha": "3.3.0",
     "altcha-lib": "2.4.0"
   },
   "devDependencies": {
