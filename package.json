@@ -29,6 +29,6 @@
   "devDependencies": {
     "bot-signal": "2.0.14",
     "esbuild": "0.28.2",
-    "playwright-core": "1.62.1"
+    "playwright-core": "1.64.0"
   }
 }
